@@ -9,6 +9,7 @@
   :name "Simon Funk's quasi SVD"
   :author "Gabor Melis"
   :version "0.0.1"
+  :licence "MIT"
   :components ((:file "package")
                (:file "fsvd"))
   :serial t)
