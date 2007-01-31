@@ -282,7 +282,7 @@ on the calling context that is evident in its second argument."
             (add sv))
       (loop for n upfrom (length svd) do
             (unless (supervise svd nil)
-              (return))
+              (return svd))
             (let ((sv (svd-1 matrix :trainer trainer :svd svd
                              :supervisor #'supervise)))
               (add sv)
