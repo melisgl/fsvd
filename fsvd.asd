@@ -8,7 +8,7 @@
 (defsystem #:fsvd
   :name "Simon Funk's quasi SVD"
   :author "Gabor Melis"
-  :version "0.0.1"
+  :version "0.0.2"
   :licence "MIT"
   :components ((:file "package")
                (:file "fsvd"))

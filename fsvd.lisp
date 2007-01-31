@@ -2,10 +2,6 @@
 
 ;;; Possibly sparse matrix interface
 
-(defgeneric map-matrix (matrix fn)
-  (:documentation "Call FN for each non-missing cell of MATRIX. FN is
-a function of four parameters: ROW, COLUMN, VALUE and DENSE-INDEX."))
-
 (defgeneric height-of (matrix &key densep)
   (:documentation "Return the number of rows of MATRIX."))
 
@@ -24,6 +20,17 @@ NIL for empty rows."))
 (defgeneric map-column-densely (matrix column)
   (:documentation "Number those columns that are not empty from 0.
 Return NIL for empty columns."))
+
+(defgeneric map-matrix (function matrix)
+  (:documentation "Call FUNCTION for each non-missing cell of MATRIX.
+FUNCTION is of four parameters: ROW, COLUMN, VALUE and DENSE-INDEX."))
+
+(defmacro do-matrix-by-mapping (((row column value dense-index) matrix)
+                                &body body)
+  "A simple, inefficient implementation of DO-MATRIX on top of
+MAP-MATRIX. See function SVD."
+  `(map-matrix (lambda (,row ,column ,value ,dense-index) ,@body)
+    ,matrix))
 
 ;;; Vector utilities
 
@@ -181,7 +188,7 @@ to some valid range if any after every pass."
                                      (- (* err r)
                                         (* ,normalization-factor l)))))))))
 
-(defun svd-1 (matrix &key trainer svd test)
+(defun svd-1 (matrix &key trainer svd supervisor)
   (declare (type svd svd))
   ;; We work with sparse indices to avoid having to map indices and
   ;; compact SV then necessary.
@@ -191,7 +198,7 @@ to some valid range if any after every pass."
          (right (sv-right sv)))
     (loop for i upfrom 0 do
           (funcall trainer left right)
-          (unless (funcall test
+          (unless (funcall supervisor
                            (append-to-svd svd (compact-sv sv matrix))
                            i)
             (return)))
@@ -199,7 +206,7 @@ to some valid range if any after every pass."
 
 (defun svd (matrix &key (svd (make-svd)) (base-approximator (constantly 0.0))
             (learning-rate 0.001) (normalization-factor 0.02)
-            test (clip 'identity) do-matrix)
+            supervisor (clip 'identity) (do-matrix 'do-matrix-by-mapping))
   "Approximate the single-float MATRIX with a quasi singular value
 decomposition. Each SV of an SVD consists of a left and a right
 vector. The sum of the outer products of the left and right vectors of
@@ -218,7 +225,8 @@ alone.
 
 DO-MATRIX is a symbol that denotes a macro whose lambda list is (((ROW
 COLUMN VALUE DENSE-INDEX) MATRIX) &BODY BODY). It is used to iterate
-over all present cells in a matrix fast.
+over all present cells in a matrix fast. The default is a slow one
+implemented in terms of MAP-MATRIX.
 
 To make training fast, a new trainer function is compiled using for
 each SVD call using CLIP and DO-MATRIX.
@@ -227,13 +235,13 @@ LEARNING-RATE controls the how much weights are drawn towards to
 optimum at each step while the Tikhonov NORMALIZATION-FACTOR penalizes
 large weights.
 
-TEST is a function of two arguments. The first argument is always the
-current SVD. The second value is NIL when it is called just before a
-new SV is added to the SVD, and when the test function is called while
-a single SV is being tuned it is a number that denotes the current
-iteration that was finished. If TEST returns NIL the tuning of the
-current SV or the whole process in terminated depending on the calling
-context that is evident in its second argument."
+SUPERVISOR is a function of two arguments. The first argument is
+always the current SVD. The second value is NIL when it is called just
+before a new SV is added to the SVD, and when the supervisor function
+is called while a single SV is being tuned it is a number that denotes
+the current iteration that was finished. If SUPERVISOR returns NIL the
+tuning of the current SV or the whole process in terminated depending
+on the calling context that is evident in its second argument."
   (let* ((approximation (make-array (size-of matrix)
                                     :element-type 'single-float))
          (trainer (compile nil
@@ -246,21 +254,20 @@ context that is evident in its second argument."
                                   :do-matrix do-matrix))))
          (clip (coerce clip 'function)))
     (map-matrix
-     matrix
      (lambda (row column value i)
        (declare (ignore value))
        (setf (aref approximation i)
-             (funcall clip (funcall base-approximator row column)))))
-    (flet ((test (svd i)
-             (when test
-               (funcall test svd i :base-approximator base-approximator
+             (funcall clip (funcall base-approximator row column))))
+     matrix)
+    (flet ((supervise (svd i)
+             (when supervisor
+               (funcall supervisor svd i :base-approximator base-approximator
                         :clip clip)))
            (add (sv)
              (let ((left (sv-left sv))
                    (right (sv-right sv)))
                (declare (type single-float-vector approximation))
                (map-matrix
-                matrix
                 (lambda (row column value i)
                   (declare (ignore value))
                   (let ((row (map-row-densely matrix row))
@@ -269,12 +276,14 @@ context that is evident in its second argument."
                           (funcall clip
                                    (+ (aref approximation i)
                                       (* (aref left row)
-                                         (aref right column)))))))))))
+                                         (aref right column)))))))
+                matrix))))
       (loop for sv across svd do
             (add sv))
       (loop for n upfrom (length svd) do
-            (test svd nil)
-            (let ((sv (svd-1 matrix :trainer trainer :svd svd :test #'test)))
+            (supervise svd nil)
+            (let ((sv (svd-1 matrix :trainer trainer :svd svd
+                             :supervisor #'supervise)))
               (add sv)
               (setf svd (append-to-svd svd sv)))))))
 
@@ -292,3 +301,60 @@ coordinates to query the SVD."
             (row (map-row-densely matrix row))
             (column (map-column-densely matrix column)))
         (svd-value svd row column :base-value base-value :clip clip)))))
+
+;;; Utility class
+
+(defclass limiting-supervisor ()
+  ((svd-in-progress :initform (make-svd) :accessor svd-in-progress)
+   (max-n-iterations :initform nil :initarg :max-n-iterations
+                     :accessor max-n-iterations)
+   (max-n-svs :initform nil :initarg :max-n-svs :accessor max-n-svs)
+   (subsupervisor :initform nil :initarg :subsupervisor
+                  :accessor subsupervisor)))
+
+(defgeneric supervise-svd (supervisor svd iterating &key base-approximator clip)
+  (:method ((supervisor limiting-supervisor) svd iteration &key
+            base-approximator clip)
+    (with-slots (svd-in-progress max-n-iterations max-n-svs subsupervisor)
+        supervisor
+      (setf svd-in-progress svd)
+      (and (or (null max-n-svs) (< (1+ (length svd)) max-n-svs))
+           (or (null iteration) (null max-n-iterations)
+               (< iteration max-n-iterations))
+           (or (null subsupervisor)
+               (funcall subsupervisor svd iteration
+                        :base-approximator base-approximator
+                        :clip clip))))))
+
+(defun make-supervisor-function (supervisor)
+  (lambda (svd i &key base-approximator clip)
+    (supervise-svd supervisor svd i :base-approximator base-approximator
+                   :clip clip)))
+
+;;; Simplistic implementation of the FSVD matrix interface for 2D arrays
+
+(defmethod height-of ((array array) &key densep)
+  (declare (ignore densep))
+  (array-dimension array 0))
+
+(defmethod width-of ((array array) &key densep)
+  (declare (ignore densep))
+  (array-dimension array 1))
+
+(defmethod size-of ((array array))
+  (array-total-size array))
+
+(defmethod map-row-densely ((array array) row)
+  (declare (ignore array))
+  row)
+
+(defmethod map-column-densely ((array array) column)
+  (declare (ignore array))
+  column)
+
+(defmethod map-matrix (function (array array))
+  (loop for row below (height-of array) do
+        (loop for column below (width-of array) do
+              (when (aref array row column)
+                (funcall function row column (aref array row column)
+                         (array-row-major-index array row column))))))

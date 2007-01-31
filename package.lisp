@@ -15,4 +15,11 @@
            #:save-svd
            #:load-svd
            #:svd-value
-           #:make-svd-approximator))
+           #:make-svd-approximator
+           #:limiting-supervisor
+           #:svd-in-progress
+           #:max-n-iterations
+           #:max-n-svs
+           #:subsupervisor
+           #:supervise-svd
+           #:make-supervisor-function))
