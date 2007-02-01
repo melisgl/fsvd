@@ -25,12 +25,20 @@ Return NIL for empty columns."))
   (:documentation "Call FUNCTION for each non-missing cell of MATRIX.
 FUNCTION is of four parameters: ROW, COLUMN, VALUE and DENSE-INDEX."))
 
-(defmacro do-matrix-by-mapping (((row column value dense-index) matrix)
-                                &body body)
-  "A simple, inefficient implementation of DO-MATRIX on top of
-MAP-MATRIX. See function SVD."
-  `(map-matrix (lambda (,row ,column ,value ,dense-index) ,@body)
+(defmacro do-matrix (((row column value dense-index) matrix)
+                     &body body)
+  "A simple, inefficient implementation of the macro interface to
+iterate over MATRIX."
+  `(map-matrix (lambda (,row ,column ,value ,dense-index)
+                 ,@body)
     ,matrix))
+
+(defgeneric do-matrix-macro-name (matrix)
+  (:method ((matrix t))
+    'do-matrix)
+  (:documentation "Return the name of the macro that provides a
+hopefully efficient way to iterate over MATRIX. See DO-MATRIX for an
+example."))
 
 ;;; Vector utilities
 
@@ -206,7 +214,7 @@ to some valid range if any after every pass."
 
 (defun svd (matrix &key (svd (make-svd)) (base-approximator (constantly 0.0))
             (learning-rate 0.001) (normalization-factor 0.02)
-            supervisor (clip 'identity) (do-matrix 'do-matrix-by-mapping))
+            supervisor (clip 'identity))
   "Approximate the single-float MATRIX with a quasi singular value
 decomposition. Each SV of an SVD consists of a left and a right
 vector. The sum of the outer products of the left and right vectors of
@@ -223,13 +231,8 @@ CLIP is a symbol that is fbound to a function that takes a single
 single-float and returns it clamped into some valid range or leaves it
 alone.
 
-DO-MATRIX is a symbol that denotes a macro whose lambda list is (((ROW
-COLUMN VALUE DENSE-INDEX) MATRIX) &BODY BODY). It is used to iterate
-over all present cells in a matrix fast. The default is a slow one
-implemented in terms of MAP-MATRIX.
-
-To make training fast, a new trainer function is compiled using for
-each SVD call using CLIP and DO-MATRIX.
+To make training fast, a new trainer function is compiled for each SVD
+call using CLIP and DO-MATRIX-MACRO-NAME for MATRIX.
 
 LEARNING-RATE controls the how much weights are drawn towards to
 optimum at each step while the Tikhonov NORMALIZATION-FACTOR penalizes
@@ -251,7 +254,7 @@ on the calling context that is evident in its second argument."
                                   :learning-rate learning-rate
                                   :normalization-factor normalization-factor
                                   :clip clip
-                                  :do-matrix do-matrix))))
+                                  :do-matrix (do-matrix-macro-name matrix)))))
          (clip (coerce clip 'function)))
     (map-matrix
      (lambda (row column value i)
@@ -262,7 +265,8 @@ on the calling context that is evident in its second argument."
     (flet ((supervise (svd i)
              (when supervisor
                (funcall supervisor svd i :base-approximator base-approximator
-                        :clip clip)))
+                        :clip clip :matrix matrix
+                        :approximation approximation)))
            (add (sv)
              (let ((left (sv-left sv))
                    (right (sv-right sv)))
@@ -315,7 +319,7 @@ coordinates to query the SVD."
 
 (defgeneric supervise-svd (supervisor svd iteration &key base-approximator clip)
   (:method ((supervisor limiting-supervisor) svd iteration &key
-            base-approximator clip)
+            base-approximator clip matrix approximation)
     (with-slots (svd-in-progress max-n-iterations max-n-svs subsupervisor)
         supervisor
       (setf svd-in-progress svd)
@@ -326,12 +330,12 @@ coordinates to query the SVD."
            (or (null subsupervisor)
                (funcall subsupervisor svd iteration
                         :base-approximator base-approximator
-                        :clip clip))))))
+                        :clip clip :matrix matrix
+                        :approximation approximation))))))
 
 (defun make-supervisor-function (supervisor)
-  (lambda (svd i &key base-approximator clip)
-    (supervise-svd supervisor svd i :base-approximator base-approximator
-                   :clip clip)))
+  (lambda (&rest args)
+    (apply #'supervise-svd supervisor args)))
 
 ;;; Simplistic implementation of the FSVD matrix interface for 2D arrays
 

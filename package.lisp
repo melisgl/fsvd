@@ -6,6 +6,8 @@
            #:size-of
            #:map-row-densely
            #:map-column-densely
+           #:do-matrix
+           #:do-matrix-macro-name
            #:sv
            #:sv-left
            #:sv-right
