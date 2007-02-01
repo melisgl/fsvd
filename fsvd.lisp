@@ -313,13 +313,14 @@ coordinates to query the SVD."
    (subsupervisor :initform nil :initarg :subsupervisor
                   :accessor subsupervisor)))
 
-(defgeneric supervise-svd (supervisor svd iterating &key base-approximator clip)
+(defgeneric supervise-svd (supervisor svd iteration &key base-approximator clip)
   (:method ((supervisor limiting-supervisor) svd iteration &key
             base-approximator clip)
     (with-slots (svd-in-progress max-n-iterations max-n-svs subsupervisor)
         supervisor
       (setf svd-in-progress svd)
-      (and (or (null max-n-svs) (< (1+ (length svd)) max-n-svs))
+      (and (or (null max-n-svs)
+               (<= (+ (length svd) (if iteration 0 1)) max-n-svs))
            (or (null iteration) (null max-n-iterations)
                (< iteration max-n-iterations))
            (or (null subsupervisor)
