@@ -10,8 +10,7 @@
 
 (defgeneric size-of (matrix)
   (:documentation "Return the number known cells in MATRIX. This is an
-upper limit for dense indices returned by the DO-MATRIX argument of
-SVD."))
+upper limit for dense indices produced by MAP-MATRIX."))
 
 (defgeneric map-row-densely (matrix row)
   (:documentation "Number those rows that are not empty from 0. Return
@@ -364,3 +363,20 @@ coordinates to query the SVD."
               (when (aref array row column)
                 (funcall function row column (aref array row column)
                          (array-row-major-index array row column))))))
+
+(defmacro do-array-matrix (((row column value dense-index) matrix)
+                           &body body)
+  (let ((width (gensym))
+        (%matrix (gensym)))
+    `(let* ((,%matrix ,matrix)
+            (,dense-index 0)
+            (,width (width-of ,%matrix)))
+       (dotimes (,row (height-of ,%matrix))
+         (dotimes (,column ,width)
+           (let ((,value (aref ,%matrix ,row ,column)))
+             (when ,value
+               ,@body)
+             (incf ,dense-index)))))))
+
+(defmethod do-matrix-macro-name ((array array))
+  'do-array-matrix)

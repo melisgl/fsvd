@@ -2,6 +2,4 @@
 
 - examples
 
-- default implementation of the sparse matrix interface for 2d arrays
-
 - portable save/load (only works on sbcl)
