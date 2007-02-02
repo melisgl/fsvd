@@ -4,7 +4,7 @@
                         ;; Declare the type to help us silence
                         ;; compilation warnings coming from the
                         ;; compilation of inner training loop.
-                        :element-type (list 'member (apply #'append contents))
+                        :element-type (list* 'member (apply #'append contents))
                         :initial-contents contents))
          (svd (fsvd:svd m :learning-rate learning-rate
                         :normalization-factor 0.0
