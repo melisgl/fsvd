@@ -18,10 +18,10 @@
            #:load-svd
            #:svd-value
            #:make-svd-approximator
+           ;; Utilities
+           #:approximation-rmse
            #:limiting-supervisor
            #:svd-in-progress
            #:max-n-iterations
            #:max-n-svs
-           #:subsupervisor
-           #:supervise-svd
-           #:make-supervisor-function))
+           #:supervise-svd))

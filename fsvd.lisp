@@ -237,13 +237,10 @@ LEARNING-RATE controls the how much weights are drawn towards to
 optimum at each step while the Tikhonov NORMALIZATION-FACTOR penalizes
 large weights.
 
-SUPERVISOR is a function of two arguments. The first argument is
-always the current SVD. The second value is NIL when it is called just
-before a new SV is added to the SVD, and when the supervisor function
-is called while a single SV is being tuned it is a number that denotes
-the current iteration that was finished. If SUPERVISOR returns NIL the
-tuning of the current SV or the whole process in terminated depending
-on the calling context that is evident in its second argument."
+After each iteration on a SV and also before adding a new SV
+SUPERVISE-SVD is invoked on SUPERVISOR. The return value being NIL
+indicates that the supervisor wants to stop. See SUPERVISE-SVD for
+details."
   (let* ((approximation (make-array (size-of matrix)
                                     :element-type 'single-float))
          (trainer (compile nil
@@ -262,10 +259,10 @@ on the calling context that is evident in its second argument."
              (funcall clip (funcall base-approximator row column))))
      matrix)
     (flet ((supervise (svd i)
-             (when supervisor
-               (funcall supervisor svd i :base-approximator base-approximator
-                        :clip clip :matrix matrix
-                        :approximation approximation)))
+             (supervise-svd supervisor svd i
+                            :base-approximator base-approximator
+                            :clip clip :matrix matrix
+                            :approximation approximation))
            (add (sv)
              (let ((left (sv-left sv))
                    (right (sv-right sv)))
@@ -306,35 +303,58 @@ coordinates to query the SVD."
             (column (map-column-densely matrix column)))
         (svd-value svd row column :base-value base-value :clip clip)))))
 
-;;; Utility class
+;;; Utilities
+
+(defun approximation-rmse (matrix dense-approximation)
+  (let ((sum 0.0d0)
+        (n 0))
+    (fsvd:do-matrix ((row column value index) matrix)
+      (declare (ignore row column))
+      (incf sum (expt (- value (aref dense-approximation index)) 2))
+      (incf n))
+    (sqrt (/ sum n))))
 
 (defclass limiting-supervisor ()
   ((svd-in-progress :initform (make-svd) :accessor svd-in-progress)
    (max-n-iterations :initform nil :initarg :max-n-iterations
                      :accessor max-n-iterations)
    (max-n-svs :initform nil :initarg :max-n-svs :accessor max-n-svs)
-   (subsupervisor :initform nil :initarg :subsupervisor
-                  :accessor subsupervisor)))
+   (trace-stream :initform *trace-output* :initarg :trace-stream
+                 :accessor trace-stream))
+  (:documentation "Construct an instance, keep it around and while the
+SVD is in progress inspect/save SVD-IN-PROGRESS, or set MAX-N-SVS as
+you see how the learning is going."))
 
-(defgeneric supervise-svd (supervisor svd iteration &key base-approximator clip)
+(defgeneric supervise-svd (supervisor svd iteration &key base-approximator clip
+                                      matrix approximation
+                                      &allow-other-keys)
+  (:method ((supervisor function) svd iteration &rest args)
+    (apply supervisor svd iteration args))
+  (:method ((supervisor symbol) svd iteration &rest args)
+    (apply supervisor svd iteration args))
   (:method ((supervisor limiting-supervisor) svd iteration &key
             base-approximator clip matrix approximation)
-    (with-slots (svd-in-progress max-n-iterations max-n-svs subsupervisor)
+    (declare (ignore base-approximator clip))
+    (with-slots (svd-in-progress max-n-iterations max-n-svs trace-stream)
         supervisor
+      (when (null iteration)
+        (format trace-stream "With ~S SVs, RMSE: ~S~%" (length svd)
+                (approximation-rmse matrix approximation))
+        (force-output))
       (setf svd-in-progress svd)
       (and (or (null max-n-svs)
                (<= (+ (length svd) (if iteration 0 1)) max-n-svs))
            (or (null iteration) (null max-n-iterations)
-               (< iteration max-n-iterations))
-           (or (null subsupervisor)
-               (funcall subsupervisor svd iteration
-                        :base-approximator base-approximator
-                        :clip clip :matrix matrix
-                        :approximation approximation))))))
-
-(defun make-supervisor-function (supervisor)
-  (lambda (&rest args)
-    (apply #'supervise-svd supervisor args)))
+               (< iteration max-n-iterations)))))
+  (:documentation "This is invoked from SVD on its SUPERVISOR
+argument. If ITERATION is NIL then a new SV is about to be added and
+upon rejecting that and returning NIL the decomposition is finished.
+When ITERATION is not NIL, it is a non-negative integer that is the
+index of the current iteration on the last SV of SVD. MATRIX,
+BASE-APPROXIMATOR, CLIP are passed through verbatim from the SVD call.
+APPROXIMATION is a single-float vector that parallels MATRIX with
+dense indices (see MAP-MATRIX). APPROXIMATION is updated when about to
+start on a new SV."))
 
 ;;; Simplistic implementation of the FSVD matrix interface for 2D arrays
 

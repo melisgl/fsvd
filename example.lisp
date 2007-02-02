@@ -8,11 +8,11 @@
                         :initial-contents contents))
          (svd (fsvd:svd m :learning-rate learning-rate
                         :normalization-factor 0.0
-                        :supervisor
-                        (fsvd:make-supervisor-function
-                         (make-instance 'fsvd:limiting-supervisor
-                                        :max-n-iterations n-iterations
-                                        :max-n-svs n-svs)))))
+                        :supervisor (fsvd:make-supervisor-function
+                                     (make-instance
+                                      'fsvd:limiting-supervisor
+                                      :max-n-iterations n-iterations
+                                      :max-n-svs n-svs)))))
     (format t "~S~%" svd)
     (dotimes (row (fsvd:height-of m))
       (dotimes (column (fsvd:width-of m))
