@@ -370,8 +370,8 @@ coordinates to query the SVD."
         (%matrix (gensym)))
     `(let* ((,%matrix ,matrix)
             (,dense-index 0)
-            (,width (width-of ,%matrix)))
-       (dotimes (,row (height-of ,%matrix))
+            (,width (the fixnum (width-of ,%matrix))))
+       (dotimes (,row (the fixnum (height-of ,%matrix)))
          (dotimes (,column ,width)
            (let ((,value (aref ,%matrix ,row ,column)))
              (when ,value
