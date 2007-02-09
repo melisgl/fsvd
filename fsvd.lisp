@@ -3,26 +3,35 @@
 ;;; Possibly sparse matrix interface
 
 (defgeneric height-of (matrix &key densep)
-  (:documentation "Return the number of rows of MATRIX."))
+  (:documentation "Return the number of rows of MATRIX. If DENSEP
+return the number of non-empty rows."))
 
 (defgeneric width-of (matrix &key densep)
-  (:documentation "Return the number of columns of MATRIX."))
+  (:documentation "Return the number of columns of MATRIX. If DENSEP
+return the number of non-empty columns."))
 
 (defgeneric size-of (matrix)
   (:documentation "Return the number known cells in MATRIX. This is an
-upper limit for dense indices produced by MAP-MATRIX."))
+upper limit for the dense indices produced by MAP-MATRIX."))
 
-(defgeneric map-row-densely (matrix row)
+(defgeneric dense-row-index (matrix row)
   (:documentation "Number those rows that are not empty from 0. Return
-NIL for empty rows."))
+NIL for empty rows.")
+  (:method ((matrix t) row)
+    row))
 
-(defgeneric map-column-densely (matrix column)
+(defgeneric dense-column-index (matrix column)
   (:documentation "Number those columns that are not empty from 0.
-Return NIL for empty columns."))
+Return NIL for empty columns.")
+  (:method ((matrix t) column)
+    column))
 
 (defgeneric map-matrix (function matrix)
-  (:documentation "Call FUNCTION for each non-missing cell of MATRIX.
-FUNCTION is of four parameters: ROW, COLUMN, VALUE and DENSE-INDEX."))
+  (:documentation "Call FUNCTION for each non-empty cell of MATRIX.
+FUNCTION is of four parameters: ROW, COLUMN, VALUE and DENSE-INDEX
+where DENSE-INDEX is akin to a row major index except it doesn't skips
+over empty cells. DENSE-INDEX is always less than the SIZE-OF the
+MATRIX."))
 
 (defmacro do-matrix (((row column value dense-index) matrix)
                      &body body)
@@ -119,8 +128,8 @@ that uses dense indices."
                      (setf (aref target dense-i) (aref source i)))))))
     (let ((new-sv (create-sv (height-of matrix :densep t)
                              (width-of matrix :densep t))))
-      (compact (sv-left new-sv) (sv-left sv) #'map-row-densely)
-      (compact (sv-right new-sv) (sv-right sv) #'map-column-densely)
+      (compact (sv-left new-sv) (sv-left sv) #'dense-row-index)
+      (compact (sv-right new-sv) (sv-right sv) #'dense-column-index)
       new-sv)))
 
 (defun save-svd (svd filename)
@@ -270,8 +279,8 @@ details."
                (map-matrix
                 (lambda (row column value i)
                   (declare (ignore value))
-                  (let ((row (map-row-densely matrix row))
-                        (column (map-column-densely matrix column)))
+                  (let ((row (dense-row-index matrix row))
+                        (column (dense-column-index matrix column)))
                     (setf (aref approximation i)
                           (funcall clip
                                    (+ (aref approximation i)
@@ -299,8 +308,8 @@ coordinates to query the SVD."
   (let ((svd (subseq svd 0 max-n)))
     (lambda (row column)
       (let ((base-value (funcall base-approximator row column))
-            (row (map-row-densely matrix row))
-            (column (map-column-densely matrix column)))
+            (row (dense-row-index matrix row))
+            (column (dense-column-index matrix column)))
         (svd-value svd row column :base-value base-value :clip clip)))))
 
 ;;; Utilities
@@ -368,14 +377,6 @@ start on a new SV."))
 
 (defmethod size-of ((array array))
   (array-total-size array))
-
-(defmethod map-row-densely ((array array) row)
-  (declare (ignore array))
-  row)
-
-(defmethod map-column-densely ((array array) column)
-  (declare (ignore array))
-  column)
 
 (defmethod map-matrix (function (array array))
   (loop for row below (height-of array) do
