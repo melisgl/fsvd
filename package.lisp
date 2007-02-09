@@ -4,8 +4,8 @@
            #:height-of
            #:width-of
            #:size-of
-           #:map-row-densely
-           #:map-column-densely
+           #:dense-row-index
+           #:dense-column-index
            #:do-matrix
            #:do-matrix-macro-name
            #:sv
