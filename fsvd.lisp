@@ -53,10 +53,10 @@ example."))
 (deftype single-float-vector () '(simple-array single-float (*)))
 (deftype 2d-single-float-array () '(simple-array single-float (* *)))
 
-(defun make-v (length)
+(defun make-v (length initial-element)
   (let ((r (make-array length :element-type 'single-float)))
     (loop for i below length do
-          (setf (aref r i) 0.1))
+          (setf (aref r i) initial-element))
     r))
 
 ;;; Reading and writing float arrays
@@ -105,8 +105,8 @@ example."))
   (left nil :type (simple-array single-float *))
   (right nil :type (simple-array single-float *)))
 
-(defun create-sv (height width)
-  (make-sv :left (make-v height) :right (make-v width)))
+(defun create-sv (height width &optional (value 0.1))
+  (make-sv :left (make-v height value) :right (make-v width value)))
 
 (deftype svd ()
   "SVD consists of n SVs - pairs of left and right vector - of the
@@ -117,6 +117,16 @@ summing pairwise the outer products of these vectors."
 (defun make-svd ()
   "Create an empty SVD."
   (make-array 0 :element-type 'sv :initial-element (create-sv 0 0)))
+
+(defun magnify-sv (sv magnification)
+  (let* ((left-length (length (sv-left sv)))
+         (right-length (length (sv-right sv)))
+         (new-sv (create-sv left-length right-length)))
+    (map-into (sv-left new-sv) (lambda (x) (* x magnification))
+              (sv-left sv))
+    (map-into (sv-right new-sv) (lambda (x) (* x magnification))
+              (sv-right sv))
+    new-sv))
 
 (defun compact-sv (sv matrix)
   "Take a SV that uses sparse indices of matrix and turn it into one
@@ -186,15 +196,17 @@ to some valid range if any after every pass."
 (defmacro train/epoch (&key matrix approximation
                        learning-rate normalization-factor
                        clip do-matrix)
-  `(lambda (left right)
+  `(lambda (left right magnification)
      (declare (type single-float-vector left right)
+              (type single-float magnification)
               (inline ,clip)
               (optimize (speed 3)))
      (,do-matrix ((row column value index) ,matrix)
        (let* ((l (aref left row))
               (r (aref right column))
-              (err (- value (,clip (+ (aref ,approximation index)
-                                      (* l r))))))
+              (err (* magnification
+                      (- value (,clip (+ (aref ,approximation index)
+                                         (/ (* l r) magnification)))))))
          (setf (aref right column) (+ r
                                       (* ,learning-rate
                                          (- (* err l)
@@ -204,21 +216,27 @@ to some valid range if any after every pass."
                                      (- (* err r)
                                         (* ,normalization-factor l)))))))))
 
-(defun svd-1 (matrix &key trainer svd supervisor)
+(defun svd-1 (matrix &key trainer svd supervisor magnification)
   (declare (type svd svd))
   ;; We work with sparse indices to avoid having to map indices and
   ;; compact SV then necessary.
+  (format t "M=~S~%" magnification)
   (let* ((sv (create-sv (height-of matrix :densep nil)
-                        (width-of matrix :densep nil)))
+                        (width-of matrix :densep nil)
+                        (* 0.1 (sqrt magnification))))
          (left (sv-left sv))
-         (right (sv-right sv)))
+         (right (sv-right sv))
+         (r-magnification (/ (sqrt magnification))))
     (loop for i upfrom 0 do
-          (funcall trainer left right)
+          (funcall trainer left right magnification)
           (unless (funcall supervisor
-                           (append-to-svd svd (compact-sv sv matrix))
+                           (append-to-svd svd
+                                          (compact-sv
+                                           (magnify-sv sv r-magnification)
+                                           matrix))
                            i)
             (return)))
-    (compact-sv sv matrix)))
+    (compact-sv (magnify-sv sv r-magnification) matrix)))
 
 (defun svd (matrix &key (svd (make-svd)) (base-approximator (constantly 0.0))
             (learning-rate 0.001) (normalization-factor 0.02)
@@ -292,8 +310,10 @@ details."
       (loop for n upfrom (length svd) do
             (unless (supervise svd nil)
               (return svd))
-            (let ((sv (svd-1 matrix :trainer trainer :svd svd
-                             :supervisor #'supervise)))
+            (let* ((mean-error (approximation-me matrix approximation))
+                   (sv (svd-1 matrix :trainer trainer :svd svd
+                              :supervisor #'supervise
+                              :magnification (/ (float mean-error 0.0)))))
               (add sv)
               (setf svd (append-to-svd svd sv)))))))
 
@@ -313,6 +333,18 @@ coordinates to query the SVD."
         (svd-value svd row column :base-value base-value :clip clip)))))
 
 ;;; Utilities
+
+(defun approximation-me (matrix dense-approximation)
+  (let ((sum 0.0d0)
+        (n 0))
+    (fsvd:do-matrix ((row column value index) matrix)
+      (declare (ignore row column))
+      (unless (zerop value)
+        (incf sum (abs (- value (aref dense-approximation index))))
+        (incf n)))
+    (if (zerop n)
+        1.0
+        (/ sum n))))
 
 (defun approximation-rmse (matrix dense-approximation)
   (let ((sum 0.0d0)
