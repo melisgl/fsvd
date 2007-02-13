@@ -61,6 +61,9 @@ example."))
 
 ;;; Reading and writing float arrays
 
+#+sbcl
+(progn
+
 (defun sync->fd (fd-stream)
   (force-output fd-stream)
   (let ((fd (sb-impl::fd-stream-fd fd-stream)))
@@ -97,6 +100,8 @@ example."))
   (let ((v (make-array 1 :element-type 'single-float
                        :initial-contents (list float))))
     (write-byte (sb-sys:sap-ref-32 (sb-sys:vector-sap v) 0) stream)))
+
+)
 
 ;;; Singular value decomposition
 
