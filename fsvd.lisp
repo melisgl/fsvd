@@ -54,10 +54,8 @@ example."))
 (deftype 2d-single-float-array () '(simple-array single-float (* *)))
 
 (defun make-v (length initial-element)
-  (let ((r (make-array length :element-type 'single-float)))
-    (loop for i below length do
-          (setf (aref r i) initial-element))
-    r))
+  (make-array length :element-type 'single-float
+              :initial-element initial-element))
 
 ;;; Reading and writing float arrays
 
@@ -106,7 +104,8 @@ example."))
 ;;; Singular value decomposition
 
 (defstruct sv
-  "SV is pair of vectors."
+  "SV is a pair of vectors. They are not of unit lenght. The singular
+value is implicitly defined as the product of their euclidean norms."
   (left nil :type (simple-array single-float *))
   (right nil :type (simple-array single-float *)))
 
@@ -192,10 +191,7 @@ to some valid range if any after every pass."
     sum))
 
 (defun append-to-svd (svd sv)
-  (let ((r (make-array (1+ (length svd)))))
-    (replace r svd)
-    (setf (aref r (length svd)) sv)
-    r))
+  (adjust-array svd (1+ (length svd)) :initial-element sv))
 
 ;;; This is the performance critical loop. Compile it for each run.
 (defmacro train/epoch (&key matrix approximation
@@ -252,6 +248,8 @@ vector. The sum of the outer products of the left and right vectors of
 its consituent SVs is the approximation provided by an SVD. This SVD
 is quasi because while the rank of the approximation is N, the
 singular values are not explicit.
+
+The sparse matrix interface must be supported on MATRIX.
 
 BASE-APPROXIMATOR is a function of row and column. Its values are
 effectively subtracted from those of MATRIX. Don't forget to supply
