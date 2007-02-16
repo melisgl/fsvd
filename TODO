@@ -4,7 +4,7 @@
 
 - maybe do a few batch fine tuning passing when it has converged
 
-- the magnification effect is very ad-hoc, maybe the user could
-   supply a function
+- the learning rate magnification effect is very ad-hoc, maybe the
+   user could supply a function
 
 - tests

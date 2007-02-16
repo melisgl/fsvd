@@ -122,6 +122,7 @@ summing pairwise the outer products of these vectors."
   "Create an empty SVD."
   (make-array 0 :element-type 'sv :initial-element (create-sv 0 0)))
 
+#+nil
 (defun magnify-sv (sv magnification)
   (let* ((left-length (length (sv-left sv)))
          (right-length (length (sv-right sv)))
@@ -195,49 +196,44 @@ to some valid range if any after every pass."
 
 ;;; This is the performance critical loop. Compile it for each run.
 (defmacro train/epoch (&key matrix approximation
-                       learning-rate normalization-factor
-                       clip do-matrix)
-  `(lambda (left right magnification)
+                       normalization-factor clip do-matrix)
+  `(lambda (left right learning-rate)
      (declare (type single-float-vector left right)
-              (type single-float magnification)
+              (type single-float learning-rate)
               (inline ,clip)
               (optimize (speed 3)))
      (,do-matrix ((row column value index) ,matrix)
        (let* ((l (aref left row))
               (r (aref right column))
-              (err (* magnification
-                      (- value (,clip (+ (aref ,approximation index)
-                                         (/ (* l r) magnification)))))))
+              (err (- value (,clip (+ (aref ,approximation index)
+                                      (* l r))))))
          (setf (aref right column) (+ r
-                                      (* ,learning-rate
+                                      (* learning-rate
                                          (- (* err l)
                                             (* ,normalization-factor r)))))
          (setf (aref left row) (+ l
-                                  (* ,learning-rate
+                                  (* learning-rate
                                      (- (* err r)
                                         (* ,normalization-factor l)))))))))
 
-(defun svd-1 (matrix &key trainer svd supervisor magnification)
+(defun svd-1 (matrix &key trainer svd supervisor learning-rate)
   (declare (type svd svd))
   ;; We work with sparse indices to avoid having to map indices and
   ;; compact SV then necessary.
-  (format t "M=~S~%" magnification)
+  (format t "LR=~S~%" learning-rate)
   (let* ((sv (create-sv (height-of matrix :densep nil)
                         (width-of matrix :densep nil)
-                        (* 0.1 (sqrt magnification))))
+                        0.1))
          (left (sv-left sv))
-         (right (sv-right sv))
-         (r-magnification (/ (sqrt magnification))))
+         (right (sv-right sv)))
     (loop for i upfrom 0 do
-          (funcall trainer left right magnification)
+          (funcall trainer left right learning-rate)
           (unless (funcall supervisor
                            (append-to-svd svd
-                                          (compact-sv
-                                           (magnify-sv sv r-magnification)
-                                           matrix))
+                                          (compact-sv sv matrix))
                            i)
             (return)))
-    (compact-sv (magnify-sv sv r-magnification) matrix)))
+    (compact-sv sv matrix)))
 
 (defun svd (matrix &key (svd (make-svd)) (base-approximator (constantly 0.0))
             (learning-rate 0.001) (normalization-factor 0.02)
@@ -277,7 +273,6 @@ details."
                            (eval
                             (list 'train/epoch :matrix matrix
                                   :approximation approximation
-                                  :learning-rate learning-rate
                                   :normalization-factor normalization-factor
                                   :clip clip
                                   :do-matrix (do-matrix-macro-name matrix)))))
@@ -316,7 +311,8 @@ details."
             (let* ((mean-error (approximation-me matrix approximation))
                    (sv (svd-1 matrix :trainer trainer :svd svd
                               :supervisor #'supervise
-                              :magnification (/ (float mean-error 0.0)))))
+                              :learning-rate (/ learning-rate
+                                                (float mean-error 0.0)))))
               (add sv)
               (setf svd (append-to-svd svd sv)))))))
 
