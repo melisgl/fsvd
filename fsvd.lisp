@@ -100,6 +100,24 @@ example."))
     (write-byte (sb-sys:sap-ref-32 (sb-sys:vector-sap v) 0) stream)))
 
 )
+
+#+allegro
+(progn
+
+(defun write-float-array (array stream)
+  (declare (type (simple-array single-float (*)) array)
+           (type excl:simple-stream stream))
+  (excl:write-vector array stream))
+
+(defun read-float-array (array stream)
+  (declare (type (simple-array single-float (*)) array)
+           (type excl:simple-stream stream))
+  (let* ((l (* 4 (length array)))
+         (l2 (excl:read-vector array stream)))
+    (unless (= l l2)
+      (error "Read only ~S bytes out of ~S~%" l2 l))))
+
+)
 
 ;;; Singular value decomposition
 
@@ -121,17 +139,6 @@ summing pairwise the outer products of these vectors."
 (defun make-svd ()
   "Create an empty SVD."
   (make-array 0 :element-type 'sv :initial-element (create-sv 0 0)))
-
-#+nil
-(defun magnify-sv (sv magnification)
-  (let* ((left-length (length (sv-left sv)))
-         (right-length (length (sv-right sv)))
-         (new-sv (create-sv left-length right-length)))
-    (map-into (sv-left new-sv) (lambda (x) (* x magnification))
-              (sv-left sv))
-    (map-into (sv-right new-sv) (lambda (x) (* x magnification))
-              (sv-right sv))
-    new-sv))
 
 (defun compact-sv (sv matrix)
   "Take a SV that uses sparse indices of matrix and turn it into one
