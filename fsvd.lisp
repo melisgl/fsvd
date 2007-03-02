@@ -156,6 +156,7 @@ that uses dense indices."
 
 (defun save-svd (svd filename)
   "Write the content of SVD to FILENAME in a reasonably compact form."
+  (ensure-directories-exist filename)
   (with-open-file (stream filename :direction :output
                    :if-does-not-exist :create
                    :if-exists :supersede)
