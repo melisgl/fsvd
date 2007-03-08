@@ -29,7 +29,7 @@ Return NIL for empty columns.")
 (defgeneric map-matrix (function matrix)
   (:documentation "Call FUNCTION for each non-empty cell of MATRIX.
 FUNCTION is of four parameters: ROW, COLUMN, VALUE and DENSE-INDEX
-where DENSE-INDEX is akin to a row major index except it doesn't skips
+where DENSE-INDEX is akin to a row major index except it doesn't skip
 over empty cells. DENSE-INDEX is always less than the SIZE-OF the
 MATRIX."))
 
@@ -141,7 +141,7 @@ summing pairwise the outer products of these vectors."
   (make-array 0 :element-type 'sv :initial-element (create-sv 0 0)))
 
 (defun compact-sv (sv matrix)
-  "Take a SV that uses sparse indices of matrix and turn it into one
+  "Take SV that uses sparse indices of MATRIX and turn it into one
 that uses dense indices."
   (flet ((compact (target source map)
            (loop for i below (length source) do
@@ -152,6 +152,20 @@ that uses dense indices."
                              (width-of matrix :densep t))))
       (compact (sv-left new-sv) (sv-left sv) #'dense-row-index)
       (compact (sv-right new-sv) (sv-right sv) #'dense-column-index)
+      new-sv)))
+
+(defun expand-sv (sv matrix)
+  "Take SV that uses dense indices of MATRIX and turn it into one that
+uses normal indices."
+  (flet ((expand (target source map)
+           (loop for i below (length target) do
+                 (let ((dense-i (funcall map matrix i)))
+                   (when dense-i
+                     (setf (aref target i) (aref source dense-i)))))))
+    (let ((new-sv (create-sv (height-of matrix :densep nil)
+                             (width-of matrix :densep nil))))
+      (expand (sv-left new-sv) (sv-left sv) #'dense-row-index)
+      (expand (sv-right new-sv) (sv-right sv) #'dense-column-index)
       new-sv)))
 
 (defun save-svd (svd filename)
@@ -224,6 +238,24 @@ to some valid range if any after every pass."
                                      (- (* err r)
                                         (* ,normalization-factor l)))))))))
 
+;;; Well, this is not so critical as it is only used when starting
+;;; from an existing SVD and when going from one sv to the next in
+;;; training.
+(defmacro add-sv-to-approximation (&key matrix clip do-matrix)
+  `(lambda (sv approximation)
+     (declare (type single-float-vector approximation)
+              (inline ,clip)
+              (optimize (speed 3)))
+     (let* ((sv (expand-sv sv ,matrix))
+            (left (sv-left sv))
+            (right (sv-right sv)))
+       (,do-matrix ((row column - index2) ,matrix)
+         (setf (aref approximation index2)
+               (,clip (+ (aref approximation index2)
+                         (* (aref left row)
+                            (aref right column))))))
+       ,matrix)))
+
 (defun svd-1 (matrix &key trainer svd supervisor learning-rate)
   (declare (type svd svd))
   ;; We work with sparse indices to avoid having to map indices and
@@ -284,6 +316,11 @@ details."
                                   :normalization-factor normalization-factor
                                   :clip clip
                                   :do-matrix (do-matrix-macro-name matrix)))))
+         (adder (compile nil
+                         (eval
+                          (list 'add-sv-to-approximation
+                                :matrix matrix :clip clip
+                                :do-matrix (do-matrix-macro-name matrix)))))
          (clip (coerce clip 'function)))
     (map-matrix
      (lambda (row column value i)
@@ -297,20 +334,7 @@ details."
                             :clip clip :matrix matrix
                             :approximation approximation))
            (add (sv)
-             (let ((left (sv-left sv))
-                   (right (sv-right sv)))
-               (declare (type single-float-vector approximation))
-               (map-matrix
-                (lambda (row column value i)
-                  (declare (ignore value))
-                  (let ((row (dense-row-index matrix row))
-                        (column (dense-column-index matrix column)))
-                    (setf (aref approximation i)
-                          (funcall clip
-                                   (+ (aref approximation i)
-                                      (* (aref left row)
-                                         (aref right column)))))))
-                matrix))))
+             (funcall adder sv approximation)))
       (loop for sv across svd do
             (add sv))
       (loop for n upfrom (length svd) do
@@ -431,6 +455,7 @@ start on a new SV."))
     `(let* ((,%matrix ,matrix)
             (,dense-index 0)
             (,width (the fixnum (width-of ,%matrix))))
+       (declare (type (integer 0 #.(1- most-positive-fixnum)) ,dense-index))
        (dotimes (,row (the fixnum (height-of ,%matrix)))
          (dotimes (,column ,width)
            (let ((,value (aref ,%matrix ,row ,column)))
