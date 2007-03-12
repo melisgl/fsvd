@@ -1,6 +1,6 @@
-- initialize better, constant 0.1 is too big in some cases
+- initialize better, constant 0.1 is suboptimal
 
-- portable save/load (only works on sbcl)
+- portable save/load (only works on sbcl and allegro)
 
 - maybe do a few batch fine tuning passing when it has converged
 

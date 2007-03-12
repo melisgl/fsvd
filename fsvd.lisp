@@ -260,7 +260,7 @@ to some valid range if any after every pass."
   (declare (type svd svd))
   ;; We work with sparse indices to avoid having to map indices and
   ;; compact SV then necessary.
-  (format t "LR=~S~%" learning-rate)
+  ;;(format t "LR=~S~%" learning-rate)
   (let* ((sv (create-sv (height-of matrix :densep nil)
                         (width-of matrix :densep nil)
                         0.1))
