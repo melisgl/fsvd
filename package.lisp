@@ -15,6 +15,7 @@
    #:sv-left
    #:sv-right
    #:svd
+   #:make-sv
    #:make-svd
    #:save-svd
    #:load-svd

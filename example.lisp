@@ -1,3 +1,24 @@
+(defclass my-limiting-supervisor (fsvd:limiting-supervisor)
+  ()
+  (:documentation "Like LIMITING-SUPERVISOR but take initialization of
+SV pairs into our own hands."))
+
+(defun make-v (length)
+  (let ((r (make-array length :element-type 'single-float)))
+    (loop for i below length do
+          (setf (aref r i) (+ 0.05 (random 0.015))))
+    r))
+
+(defmethod fsvd:supervise-svd ((supervisor my-limiting-supervisor) svd iteration
+                               &key base-approximator clip matrix approximation)
+  (declare (ignore base-approximator clip approximation))
+  (values (call-next-method)
+          (if (null iteration)
+              (let ((left (make-v (fsvd:height-of matrix :densep t)))
+                    (right (make-v (fsvd:width-of matrix :densep t))))
+                (list :sv (fsvd:make-sv :left left :right right)))
+              nil)))
+
 (defun test-svd (n-svs n-iterations learning-rate contents)
   (let* ((m (make-array (list (length contents)
                               (length (first contents)))
@@ -9,7 +30,7 @@
          (svd (fsvd:svd m :learning-rate learning-rate
                         :normalization-factor 0.0
                         :supervisor (make-instance
-                                     'fsvd:limiting-supervisor
+                                     'my-limiting-supervisor
                                      :max-n-iterations n-iterations
                                      :max-n-svs n-svs))))
     (format t "~S~%" svd)

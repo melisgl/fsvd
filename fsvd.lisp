@@ -257,24 +257,32 @@ to some valid range if any after every pass."
                             (aref right column))))))
        ,matrix)))
 
-(defun svd-1 (matrix &key trainer svd supervisor learning-rate)
+(defun svd-1 (matrix &key trainer svd supervisor learning-rate0)
   (declare (type svd svd))
   ;; We work with sparse indices to avoid having to map indices and
   ;; compact SV then necessary.
-  ;;(format t "LR=~S~%" learning-rate)
-  (let* ((sv (create-sv (height-of matrix :densep nil)
-                        (width-of matrix :densep nil)
-                        0.1))
-         (left (sv-left sv))
-         (right (sv-right sv)))
-    (loop for i upfrom 0 do
-          (funcall trainer left right learning-rate)
-          (unless (funcall supervisor
-                           (append-to-svd svd
-                                          (compact-sv sv matrix))
-                           i)
-            (return)))
-    (compact-sv sv matrix)))
+  (let (sv0)
+    (flet ((supervise (svd iteration)
+             (multiple-value-bind (continuep parameters)
+                 (funcall supervisor svd iteration)
+               (when continuep
+                 (destructuring-bind (&key learning-rate sv)
+                     parameters
+                   (when sv
+                     (setf sv0 (expand-sv sv matrix)))
+                   (when learning-rate
+                     (setf learning-rate0 learning-rate))))
+               continuep)))
+      (when (supervise svd nil)
+        (unless sv0
+          (setf sv0 (create-sv (height-of matrix :densep nil)
+                               (width-of matrix :densep nil)
+                               0.1)))
+        (loop for i upfrom 0 do
+              (funcall trainer (sv-left sv0) (sv-right sv0) learning-rate0)
+              (unless (supervise (append-to-svd svd (compact-sv sv0 matrix)) i)
+                (return)))
+        (compact-sv sv0 matrix)))))
 
 (defun svd (matrix &key (svd (make-svd)) (base-approximator (constantly 0.0))
             (learning-rate 0.001) (normalization-factor 0.02)
@@ -301,8 +309,12 @@ To make training fast, a new trainer function is compiled for each SVD
 call using CLIP and DO-MATRIX-MACRO-NAME for MATRIX.
 
 LEARNING-RATE controls the how much weights are drawn towards to
-optimum at each step while the Tikhonov NORMALIZATION-FACTOR penalizes
-large weights.
+optimum at each step. By default the LEARNING-RATE is scaled by 1/MAE*
+where MAE* is the MAE mean avarage error. To avoid normalization and
+to have finer grained control one can return learning rate from the
+supervisor.
+
+The Tikhonov NORMALIZATION-FACTOR penalizes large weights.
 
 After each iteration on a SV and also before adding a new SV
 SUPERVISE-SVD is invoked on SUPERVISOR. The return value being NIL
@@ -339,13 +351,13 @@ details."
       (loop for sv across svd do
             (add sv))
       (loop for n upfrom (length svd) do
-            (unless (supervise svd nil)
-              (return svd))
             (let* ((mean-error (approximation-me matrix approximation))
                    (sv (svd-1 matrix :trainer trainer :svd svd
                               :supervisor #'supervise
-                              :learning-rate (/ learning-rate
-                                                (float mean-error 0.0)))))
+                              :learning-rate0 (/ learning-rate
+                                                 (float mean-error 0.0)))))
+              (unless sv
+                (return svd))
               (add sv)
               (setf svd (append-to-svd svd sv)))))))
 
@@ -427,7 +439,11 @@ index of the current iteration on the last SV of SVD. MATRIX,
 BASE-APPROXIMATOR, CLIP are passed through verbatim from the SVD call.
 APPROXIMATION is a single-float vector that parallels MATRIX with
 dense indices (see MAP-MATRIX). APPROXIMATION is updated when about to
-start on a new SV."))
+start on a new SV.
+
+Its second return value is a list conforming to (&KEY LEARNING-RATE
+SV) that can be used to change the learning rate dynamically and to
+initialize or change the compact representation of the current SV."))
 
 ;;; Simplistic implementation of the FSVD matrix interface for 2D arrays
 
