@@ -140,6 +140,12 @@ summing pairwise the outer products of these vectors."
   "Create an empty SVD."
   (make-array 0 :element-type 'sv :initial-element (create-sv 0 0)))
 
+(defun append-to-svd (svd sv)
+  (let ((r (make-array (1+ (length svd)) :element-type 'sv)))
+    (replace r svd)
+    (setf (aref r (length svd)) sv)
+    r))
+
 (defun compact-sv (sv matrix)
   "Take SV that uses sparse indices of MATRIX and turn it into one
 that uses dense indices."
@@ -213,9 +219,6 @@ to some valid range if any after every pass."
                                           (aref (sv-right sv) column)))))))
     sum))
 
-(defun append-to-svd (svd sv)
-  (adjust-array svd (1+ (length svd)) :initial-element sv))
-
 ;;; This is the performance critical loop. Compile it for each run.
 (defmacro train/epoch (&key matrix approximation
                        normalization-factor clip do-matrix)
@@ -260,7 +263,7 @@ to some valid range if any after every pass."
 (defun svd-1 (matrix &key trainer svd supervisor learning-rate0)
   (declare (type svd svd))
   ;; We work with sparse indices to avoid having to map indices and
-  ;; compact SV then necessary.
+  ;; compact SV when necessary.
   (let (sv0)
     (flet ((supervise (svd iteration)
              (multiple-value-bind (continuep parameters)
